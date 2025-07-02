@@ -57,7 +57,7 @@ class U2fControlPointCallback: public BLECharacteristicCallbacks {
   
   void onWrite(BLECharacteristic *pCharacteristic) {
     log_d("*** U2F Control Point ***");
-    std::string value = pCharacteristic->getValue();
+    std::string value = pCharacteristic->getValue().c_str();
     if ( (status == Idle) && (value.length() > 0) ) {
         log_d("*********");
         log_d("New value: %02x", value[0]);
@@ -80,7 +80,7 @@ class U2fControlPointCallback: public BLECharacteristicCallbacks {
 class U2fServiceRevisionCallback: public BLECharacteristicCallbacks {  
   void onWrite(BLECharacteristic *pCharacteristic) {
     log_d("*** U2F Service Revision ***");
-    std::string value = pCharacteristic->getValue();
+    std::string value = pCharacteristic->getValue().c_str();
     if (value.length() > 0) {
         //U2fServiceRevision[0] = value[0];
         log_d("*********");
@@ -202,7 +202,7 @@ bool user_presence_check() {
   std::string ka = std::string(TUP_NEEDED, sizeof(TUP_NEEDED));
   for (uint8_t i=0; i<5; i++) {
       log_d("*** TUP_NEEDED: %08x", *((uint32_t*)TUP_NEEDED)); 
-      pU2fStatus->setValue(ka);  // TUP_NEEDED: CMD HLEN LLEN DATA
+      pU2fStatus->setValue((uint8_t*)ka.c_str(), ka.length());
       pU2fStatus->notify();
       delay(250);
   }
@@ -225,7 +225,7 @@ void loop() {
   log_d("*** response length: %d", response.length());
   if (deviceConnected && (response.length() > 0)) {
     if (response.length() <= ATT_MTU) {
-      pU2fStatus->setValue(response);
+      pU2fStatus->setValue((uint8_t*)response.c_str(), response.length());
       pU2fStatus->notify();
     }
     else { // framing
@@ -233,15 +233,16 @@ void loop() {
       uint8_t framing_index = 0;
       int16_t start = 0;
       int16_t end = ATT_MTU;
-      pU2fStatus->setValue(response.substr(start, end));
+      std::string chunk = response.substr(start, end);
+      pU2fStatus->setValue((uint8_t*)chunk.c_str(), chunk.length());
       pU2fStatus->notify();
       while (end < LEN) {
         start = end;
         end += ATT_MTU-1;
         end = min(LEN, end);
         std::string str_index = std::string(1, framing_index);
-        pU2fStatus->setValue(str_index + response.substr(start, ATT_MTU-1));
-        pU2fStatus->notify();
+        std::string next_chunk = str_index + response.substr(start, ATT_MTU-1);
+        pU2fStatus->setValue((uint8_t*)next_chunk.c_str(), next_chunk.length());
         framing_index += 1;
       }
     }

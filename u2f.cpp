@@ -8,6 +8,7 @@
 #include "esp32-hal-log.h"
 #include "esp32-hal.h"
 #include "hmac.h"
+#include "esp_system.h"
 
 bool user_presence_check();
 
@@ -71,12 +72,18 @@ uint8_t signature_to_asn1(const mbedtls_mpi *r, const mbedtls_mpi *s, unsigned c
 
 
 int f_rng(void *ptr, unsigned char *buffer, size_t n) {
-  size_t i;
-  uint32_t r;
-  uint8_t *rp = (uint8_t*)&r;
-  for (i=0; i<n; i++) {
-    r = esp_random();
-    buffer[i] = rp[0] ^ rp[1] ^ rp[2] ^ rp[3];
+  (void)ptr; // Unused parameter
+
+  size_t i = 0;
+  uint32_t random_num;
+
+  while (i < n) {
+    random_num = random(); // <-- USE THE ARDUINO FUNCTION
+    
+    for (int j = 0; j < 4 && i < n; j++) {
+      buffer[i] = ((uint8_t*)&random_num)[j];
+      i++;
+    }
   }
   return 0;
 }
@@ -142,9 +149,20 @@ std::string u2f_process(std::string data) {
         return std::string((char*)SW_COMMAND_ABORTED, 2);
       }
       uint8_t user_public_key[65];
-      user_public_key[0] = 0x04;
-      mbedtls_mpi_write_binary(&Q.X, user_public_key+1, KEYLENGTH);
-      mbedtls_mpi_write_binary(&Q.Y, user_public_key+1+KEYLENGTH, KEYLENGTH);
+      size_t olen = 0; // Output length
+
+      // This single function serializes the point into the uncompressed format
+      // (0x04 followed by X and Y coordinates) directly into your buffer.
+      ret = mbedtls_ecp_point_write_binary(&grp, &Q, 
+                                     MBEDTLS_ECP_PF_UNCOMPRESSED, 
+                                     &olen, user_public_key, sizeof(user_public_key));
+      if (ret != 0) {
+      // Handle error, for example:
+      mbedtls_ecp_point_free(&Q);
+      mbedtls_ecp_group_free(&grp);
+      return std::string((char*)SW_COMMAND_ABORTED, 2);
+      }
+
       mbedtls_ecp_point_free( &Q );
       
       // generate key handle
@@ -167,14 +185,14 @@ std::string u2f_process(std::string data) {
       uint8_t input;
       mbedtls_sha256_context ctx;
       mbedtls_sha256_init(&ctx);
-      mbedtls_sha256_starts_ret(&ctx, 0);
+      mbedtls_sha256_starts(&ctx, 0);
       input = 0x00;
-      mbedtls_sha256_update_ret(&ctx, &input, 1);
-      mbedtls_sha256_update_ret(&ctx, application, HASHSIZE);
-      mbedtls_sha256_update_ret(&ctx, challenge, HASHSIZE);
-      mbedtls_sha256_update_ret(&ctx, key_handle, KEY_HANDLE_LENGTH);
-      mbedtls_sha256_update_ret(&ctx, user_public_key, sizeof(user_public_key));
-      mbedtls_sha256_finish_ret(&ctx, hash);
+      mbedtls_sha256_update(&ctx, &input, 1);
+      mbedtls_sha256_update(&ctx, application, HASHSIZE);
+      mbedtls_sha256_update(&ctx, challenge, HASHSIZE);
+      mbedtls_sha256_update(&ctx, key_handle, KEY_HANDLE_LENGTH);
+      mbedtls_sha256_update(&ctx, user_public_key, sizeof(user_public_key));
+      mbedtls_sha256_finish(&ctx, hash);
       mbedtls_sha256_free(&ctx);
       // 2. compute ECDSA
       mbedtls_mpi_read_binary(&d, PRIVATE_KEY, sizeof(PRIVATE_KEY));
@@ -289,12 +307,12 @@ std::string u2f_process(std::string data) {
       uint8_t hash[HASHSIZE];
       mbedtls_sha256_context ctx;
       mbedtls_sha256_init(&ctx);
-      mbedtls_sha256_starts_ret(&ctx, 0);
-      mbedtls_sha256_update_ret(&ctx, application, HASHSIZE);
-      mbedtls_sha256_update_ret(&ctx, &user_presence, 1);
-      mbedtls_sha256_update_ret(&ctx, counter_big, 4);
-      mbedtls_sha256_update_ret(&ctx, challenge, HASHSIZE);
-      mbedtls_sha256_finish_ret(&ctx, hash);
+      mbedtls_sha256_starts(&ctx, 0);
+      mbedtls_sha256_update(&ctx, application, HASHSIZE);
+      mbedtls_sha256_update(&ctx, &user_presence, 1);
+      mbedtls_sha256_update(&ctx, counter_big, 4);
+      mbedtls_sha256_update(&ctx, challenge, HASHSIZE);
+      mbedtls_sha256_finish(&ctx, hash);
       mbedtls_sha256_free(&ctx);
 
       // 2. compute ECDSA
